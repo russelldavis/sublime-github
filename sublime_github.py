@@ -413,23 +413,39 @@ class SwitchAccountsCommand(BaseGitHubCommand):
             self.base_uri = self.accounts[self.active_account]["base_uri"]
             self.github_token = self.accounts[self.active_account]["github_token"]
 
+class RefType:
+    CURRENT_BRANCH = 0
+    MASTER = 1
+    PERMALINK = 2
+
 if git:
     class RemoteUrlCommand(git.GitTextCommand):
         url_type = 'blob'
         allows_line_highlights = False
-        master = False  # operate on current branch by default
+        ref_type = RefType.CURRENT_BRANCH
 
         def run(self, edit):
-            if self.master:
-                branch = "master"
+            if self.ref_type == RefType.PERMALINK:
+                command = "git merge-base --fork-point master"
+                self.run_command(command.split(), self.done_merge_base)
             else:
-                branch = ""
-            command = "git rev-parse --abbrev-ref --symbolic-full-name %s@{upstream}" % branch
-            self.run_command(command.split(), self.done_rev_parse)
+                if self.ref_type == RefType.MASTER:
+                    branch = "master"
+                else:
+                    branch = ""
+                command = "git rev-parse --abbrev-ref --symbolic-full-name %s@{upstream}" % branch
+                self.run_command(command.split(), self.done_rev_parse)
+
+        def done_merge_base(self, result):
+            remote_ref = result.strip()
+            self.run_with_remote_data("", remote_ref)
 
         def done_rev_parse(self, result):
-            remote, self.remote_branch = result.strip().split("/", 1)
+            remote, remote_ref = result.strip().split("/", 1)
+            self.run_with_remote_data(remote, remote_ref)
 
+        def run_with_remote_data(self, remote, remote_ref):
+            self.remote_ref = remote_ref
             self.settings = sublime.load_settings("GitHub.sublime-settings")
             self.active_account = self.settings.get("active_account")
             self.accounts = self.settings.get("accounts")
@@ -480,7 +496,7 @@ if git:
                     (current_row, _) = self.view.rowcol(self.view.sel()[0].begin())
                     line_nums = "#L%s" % (current_row + 1)
 
-            self.url = "%s/%s/%s%s%s" % (self.repo_url, self.url_type, self.remote_branch, relative_path, line_nums)
+            self.url = "%s/%s/%s%s%s" % (self.repo_url, self.url_type, self.remote_ref, relative_path, line_nums)
             self.on_done()
 else:
     class RemoteUrlCommand(sublime_plugin.TextCommand):
@@ -498,8 +514,12 @@ class OpenRemoteUrlCommand(RemoteUrlCommand):
         webbrowser.open(self.url)
 
 
+class OpenRemoteUrlPermalinkCommand(OpenRemoteUrlCommand):
+    ref_type = RefType.PERMALINK
+
+
 class OpenRemoteUrlMasterCommand(OpenRemoteUrlCommand):
-    master = True
+    ref_type = RefType.MASTER
 
 
 class CopyRemoteUrlCommand(RemoteUrlCommand):
@@ -514,7 +534,11 @@ class CopyRemoteUrlCommand(RemoteUrlCommand):
 
 
 class CopyRemoteUrlMasterCommand(CopyRemoteUrlCommand):
-    master = True
+    ref_type = RefType.MASTER
+
+
+class CopyRemoteUrlPermalinkCommand(CopyRemoteUrlCommand):
+    ref_type = RefType.PERMALINK
 
 
 class BlameCommand(OpenRemoteUrlCommand):
@@ -522,7 +546,11 @@ class BlameCommand(OpenRemoteUrlCommand):
 
 
 class BlameMasterCommand(BlameCommand):
-    master = True
+    ref_type = RefType.MASTER
+
+
+class BlamePermalinkCommand(BlameCommand):
+    ref_type = RefType.PERMALINK
 
 
 class HistoryCommand(OpenRemoteUrlCommand):
@@ -531,7 +559,7 @@ class HistoryCommand(OpenRemoteUrlCommand):
 
 
 class HistoryMasterCommand(HistoryCommand):
-    master = True
+    ref_type = RefType.MASTER
 
 
 class EditCommand(OpenRemoteUrlCommand):
@@ -540,4 +568,4 @@ class EditCommand(OpenRemoteUrlCommand):
 
 
 class EditMasterCommand(EditCommand):
-    master = True
+    ref_type = RefType.MASTER
